@@ -8,49 +8,108 @@
 
 **調査の焦点:**
 
-- 活三（両端が開いた三）の厳密な定義と方向別判定ロジック
-- 三三・四四における「同時成立」の判定条件とエッジケース
-- 禁じ手チェックの実装パターン（仮置き→判定→戻し）
-- 白番には禁じ手が適用されない非対称ルールの扱い
-- カジュアルモード（禁じ手なし）を設けるか否かの設計判断
+- 15×15 盤面・黒先手・5 連勝利の基本ルール確認
+- 禁じ手「三三」の定義と活三（open three）の厳密な判定条件
+- 禁じ手「四四」の定義と四の同時成立判定条件
+- 禁じ手「長連」の定義（6 個以上連続は黒のみ負け）
+- 禁じ手チェックの実装方法（仮置き→判定→戻しのロジック）
 
 ## 調査プロセス
 
-- 検索・参照したファイル・関数: なし（リポジトリにゲームロジック関連ファイルが存在しないため）
-- 参照した既存ノート・仕様書: なし
-- 検討して除外した方向性: 既存コードからの禁じ手ロジック抽出を検討したが、本リポジトリにはゲームロジックが一切存在しないためグリーンフィールドと判断し除外した。外部リポジトリ（kojihayashi81/gomoku-nextjs）の PR #3〜#5 が Issue にリンクされているが、本リポジトリとは無関係なソースであるため、実装参考情報として扱うにとどめた。
+Code Investigator によるリポジトリ静的解析と Web Investigator による外部情報収集の組み合わせで実施した。Web 調査は今回も失敗しており、公式連珠ルールなどの一次情報は取得できていない。
+
+- **検索・参照したファイル・関数:**
+  - `openspec/investigations/issue-1-investigation.md:1-57` — Issue #1 の既存調査ノート（禁じ手定義の暫定まとめ・外部 PR 参照・Web 調査未完了の旨を含む）
+  - `.devcontainer/devcontainer.json:1-16` — Node.js 22 + `@anthropic-ai/claude-code` の開発環境定義
+  - `.devcontainer/Dockerfile:1-19` — Ubuntu ベース + Node.js 22 + gh CLI のコンテナイメージ定義
+  - `.github/ISSUE_TEMPLATE/ai-task.yml:1-44` — AI タスク Issue テンプレート（本 Issue #1 の元フォーマット）
+  - `.claude/commands/investigate.md:1-80` — investigate スキルの実行手順定義（調査→保存→PR 作成ワークフロー）
+  - `.claude/scripts/save-investigation.sh:1-12` — 調査ノートを `openspec/investigations/` に書き出すシェルスクリプト
+
+- **参照した既存ノート・仕様書:**
+  - `openspec/investigations/issue-1-investigation.md` — 本調査の更新対象。前回の調査で作成された暫定定義まとめが記載されており、活三の厳密な定義と公式ルール一次情報が未取得のまま残っている
+
+- **検討して除外した方向性:**
+  - リポジトリ内のゲームロジックコードの参照 — 本リポジトリはグリーンフィールド状態であり、package.json・Next.js・TypeScript・ゲームロジック関連ファイルが存在しないため対象外
+  - 外部リポジトリ（kojihayashi81/gomoku-nextjs）の PR コードの直接解析 — 今回の調査スコープでは実施せず。参考リンクとして記録するにとどめた
 
 ## 調査結果
 
 ### サマリー
 
-本リポジトリは五目並べのゲームロジックを一切含まないグリーンフィールド状態であり、盤面管理・着手処理・勝利判定・禁じ手チェックのすべてがこれから実装される。本 Issue はその前段として、連珠ルールと禁じ手の定義を文書化することを目的としており、外部リポジトリの PR が実装の参考候補として挙げられている。Web 調査は失敗したため、一次情報（公式ドキュメント・ソースコード）は今回取得できていない。
+本リポジトリは五目並べのゲームロジックを一切含まないグリーンフィールド状態であり、Issue #1 は「実装タスク」ではなく「ルール文書化タスク」である。基本ルール（15×15 盤面・黒先手・5 連勝利）と禁じ手 3 種（三三・四四・長連）の暫定定義は整理済みだが、三三の判定核心となる「活三」の厳密な定義については、Web 調査が 2 回連続で失敗しており、公式連珠ルールによる一次情報確認が取れていない。
 
 ### 詳細
 
-- **リポジトリ状態**: `.devcontainer`・`.github/ISSUE_TEMPLATE`・`.claude/commands` のみを含む CI/ワークフロー基盤のみが存在する（Code Investigator 確認）
-- **技術スタック**: Node.js 22（devcontainer 指定）、`@anthropic-ai/claude-code`（postCreateCommand でインストール）。Next.js・TypeScript などのゲームアプリ向けフレームワークはまだ追加されていない
-- **外部 PR 参照**: `kojihayashi81/gomoku-nextjs` の PR #3〜#5 が Issue にリンクされているが、本リポジトリへのマージ済みコードは存在しない。実装パターンの参考として利用可能かどうかは要確認
-- **禁じ手の定義（Collector が整理した調査焦点より）:**
-  - **三三**: 黒が一手で同時に 2 つ以上の活三（両端が空いた三）を作る着手は禁止
-  - **四四**: 黒が一手で同時に 2 つ以上の四（連続 4 個）を作る着手は禁止
-  - **長連**: 黒が 6 個以上連続して並べる着手は禁止
-  - 上記はいずれも**黒番のみ**に適用（白番は対象外）
-- **実装上の考慮点**: 禁じ手チェックは「仮置き→判定→戻し」のパターンが一般的とされる。活三の方向別判定やエッジケース（四四と三三の複合など）は実装難度が高い
+**基本ルール:**
+- 盤面: 15×15
+- 先手: 黒（黒が必ず先に打つ）
+- 勝利条件: 縦・横・斜めのいずれかで自石を 5 個連続して並べる
+- 禁じ手は**黒番のみ**に適用（白番には適用されない）
+
+**禁じ手の種類（黒のみ）:**
+
+1. **長連（ちょうれん / overline）**
+   - 定義: 黒石が 6 個以上連続して並ぶ着手
+   - 効果: 打った時点で黒の負け
+   - 備考: 白番は長連を打っても反則とならず、6 連以上でも勝利となる
+
+2. **四四（しし / double-four）**
+   - 定義: 黒が 1 手で同時に 2 つ以上の「四」を成立させる着手
+   - 四の定義: 次の 1 手で 5 連（勝利）になれる状態（両端の開閉は問わない）
+   - 効果: 打った時点で黒の負け
+
+3. **三三（さんさん / double-three）**
+   - 定義: 黒が 1 手で同時に 2 つ以上の「活三」を成立させる着手
+   - 活三の定義（暫定）: 次の 1 手で四になれる三であり、かつ両端が空いている（開いている）もの
+   - 効果: 打った時点で黒の負け
+
+**実装上のアプローチ（Collector の調査焦点より）:**
+- **仮置き→判定→戻し** パターンを採用する
+  1. 着手候補マスに仮で石を置く
+  2. 禁じ手条件（三三・四四・長連）を判定する
+  3. 石を戻して盤面状態を元に戻す
+- 縦・横・右斜め・左斜めの 4 方向それぞれで連続個数をカウントする関数が必要
+
+**リポジトリ状態（Code Investigator より）:**
+- `.devcontainer`・`.github/ISSUE_TEMPLATE`・`.claude/commands` のみを含む CI/ワークフロー基盤のみが存在する
+- 技術スタック: Node.js 22（devcontainer 指定）、`@anthropic-ai/claude-code`（postCreateCommand でインストール）、GitHub CLI（apt 経由）
+- Next.js・TypeScript などのゲームアプリ向けフレームワークはまだ追加されていない
 
 ## 要確認事項
 
-- `kojihayashi81/gomoku-nextjs` の PR #3〜#5 の実装を本プロジェクトへ流用・参考にする方針があるか不明。方向性を Issue 作成者に確認する必要がある
-- カジュアルモード（禁じ手なし）を設けるか否かは設計判断が必要であり、Issue の完了条件には明示されていない
-- 活三の「厳密な定義」（例: 連続しているか飛び三か）について公式連珠ルールを参照すべきだが、Web 調査がスキップされたため一次情報が未取得。連珠世界連盟（RIF）の公式ルールを別途参照することを推奨する
-- Web 調査失敗により、既知のバグ報告や類似 OSS の実装例が確認できていない。再調査が望ましい
+1. **活三の厳密な定義（三三判定の核心）**
+   - 「両端が空いている三」という暫定定義は、Web 調査が 2 回連続で失敗しているため公式連珠ルール（一次情報）での確認が取れていない
+   - Code Investigator の search_hints が示す検索キーワード `renju international federation official rules forbidden moves sansan shishi overline` で連珠世界連盟（RIF）公式ルール文書を別途参照することを推奨する
+   - 飛び三（間に空きがある三）を活三として扱うかどうかも未確認
+
+2. **四の定義（四四判定に関連）**
+   - 「次の 1 手で 5 連になれる状態」という暫定定義で十分か、または「長連にならない 5 連のみ」に限定するかが不明確
+   - 四四と長連が同時に成立する場合の優先順位（どちらの禁じ手を適用するか）も要確認
+
+3. **三三の例外規定**
+   - 三三でも同時に 5 連を作った場合は勝利（禁じ手が無効になる例外）の有無が一般五目並べと連珠で異なるが、本 Issue の対象ルール（一般五目並べか連珠か）が明示されていない
+
+4. **外部 PR の実装との整合性**
+   - kojihayashi81/gomoku-nextjs の PR #3・#4・#5・#7 が禁じ手を実装している可能性があるが、今回はコード確認を行っていない。本プロジェクトへの流用・参考にする方針があるかを Issue 作成者に確認することを推奨する
+
+5. **カジュアルモード（禁じ手なし）の設計判断**
+   - Issue の完了条件（基本ルールの箇条書き + 禁じ手の種類の記載）には明示されていないが、設計上の判断が必要になる可能性がある
 
 ## 外部参考ソース
 
-（Web 調査はスキップ — web investigator failed）
+（Web 調査はスキップ — Web Investigator が 2 回連続で失敗したため、official_docs および similar_issues の情報は取得できていない）
 
+**Issue にリンクされた外部リポジトリの PR（Collector より）:**
 - `kojihayashi81/gomoku-nextjs` PR #3: https://github.com/kojihayashi81/gomoku-nextjs/pull/3
 - `kojihayashi81/gomoku-nextjs` PR #4: https://github.com/kojihayashi81/gomoku-nextjs/pull/4
 - `kojihayashi81/gomoku-nextjs` PR #5: https://github.com/kojihayashi81/gomoku-nextjs/pull/5
+- `kojihayashi81/gomoku-nextjs` PR #7: https://github.com/kojihayashi81/gomoku-nextjs/pull/7
 
-> 注意: 上記は Issue にリンクされた外部リポジトリの PR であり、公式ドキュメントではありません。一次情報としての信頼性は未検証です。
+**推奨する次回調査先（Code Investigator の search_hints より）:**
+- `renju international federation official rules forbidden moves sansan shishi overline`
+- `連珠 活三 厳密な定義 両端空き 判定アルゴリズム`
+- `gomoku forbidden moves algorithm implementation three-three four-four overline detection`
+- `kojihayashi81 gomoku-nextjs forbidden moves implementation TypeScript`
+
+> 注意: 外部リポジトリの PR は公式ドキュメントではなく、一次情報としての信頼性は未検証です。
